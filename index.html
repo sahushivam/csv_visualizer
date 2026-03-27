@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Universal CSV Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#0d1117;--surface:#161b22;--surface2:#21262d;--border:#30363d;
+    --text:#e6edf3;--muted:#8b949e;--accent:#58a6ff;--accent2:#3fb950;
+    --warn:#d29922;--danger:#f85149;--purple:#bc8cff;--teal:#39d353;
+  }
+  body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;}
+
+  /* ── Drop Zone ── */
+  #dropzone{
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    height:100vh;gap:16px;
+  }
+  .drop-box{
+    border:2px dashed var(--border);border-radius:16px;padding:60px 80px;
+    text-align:center;cursor:pointer;transition:all .2s;background:var(--surface);
+  }
+  .drop-box:hover,.drop-box.drag{border-color:var(--accent);background:#1c2433;}
+  .drop-icon{font-size:3rem;margin-bottom:8px;}
+  .drop-title{font-size:1.3rem;font-weight:700;color:var(--text);}
+  .drop-sub{font-size:0.85rem;color:var(--muted);margin-top:6px;}
+  .btn{
+    display:inline-block;padding:10px 24px;border-radius:8px;font-size:0.88rem;
+    font-weight:600;cursor:pointer;border:none;background:var(--accent);color:#0d1117;
+    transition:opacity .15s;
+  }
+  .btn:hover{opacity:.85;}
+  #fileInput{display:none;}
+
+  /* ── Dashboard ── */
+  #dashboard{display:none;padding:24px;}
+  .dash-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px;}
+  .dash-title{font-size:1.3rem;font-weight:700;}
+  .dash-meta{font-size:0.78rem;color:var(--muted);}
+  .reset-btn{padding:7px 16px;border-radius:7px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);font-size:0.8rem;cursor:pointer;}
+  .reset-btn:hover{color:var(--text);border-color:var(--muted);}
+
+  /* KPI */
+  .kpi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:20px;}
+  .kpi-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px;text-align:center;}
+  .kpi-val{font-size:1.6rem;font-weight:800;line-height:1.1;}
+  .kpi-lbl{font-size:0.67rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:5px;}
+  .kpi-sub{font-size:0.69rem;color:var(--muted);margin-top:2px;}
+
+  /* Charts grid */
+  .charts-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:16px;}
+  .chart-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;}
+  .chart-card.wide{grid-column:span 2;}
+  .chart-title{font-size:0.74rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px;}
+  .chart-wrap{position:relative;}
+
+  /* Stats table */
+  .stats-table{width:100%;border-collapse:collapse;font-size:0.75rem;}
+  .stats-table th{text-align:left;padding:7px 10px;color:var(--muted);font-size:0.68rem;text-transform:uppercase;border-bottom:1px solid var(--border);}
+  .stats-table td{padding:6px 10px;border-bottom:1px solid #21262d;}
+  .stats-table tr:last-child td{border-bottom:none;}
+  .pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:0.65rem;font-weight:600;}
+  .pill-blue{background:#1c3a5e;color:var(--accent);}
+  .pill-green{background:#1a3a2a;color:var(--accent2);}
+  .pill-warn{background:#3d2e0a;color:var(--warn);}
+  .pill-danger{background:#3d1515;color:var(--danger);}
+
+  /* Mini bar */
+  .bar-mini{height:5px;border-radius:3px;background:var(--border);overflow:hidden;margin-top:3px;}
+  .bar-fill{height:100%;border-radius:3px;}
+
+  /* Correlation heatmap */
+  .heatmap{display:grid;gap:2px;font-size:0.6rem;}
+  .hm-cell{display:flex;align-items:center;justify-content:center;border-radius:3px;height:28px;font-weight:600;}
+
+  @media(max-width:700px){
+    .charts-grid{grid-template-columns:1fr;}
+    .chart-card.wide{grid-column:span 1;}
+    .kpi-grid{grid-template-columns:repeat(2,1fr);}
+  }
+</style>
+</head>
+<body>
+
+<!-- Drop Zone -->
+<div id="dropzone">
+  <div class="drop-box" id="dropBox">
+    <div class="drop-icon">📊</div>
+    <div class="drop-title">Drop your CSV here</div>
+    <div class="drop-sub">Any CSV — columns auto-detected &amp; visualised</div>
+    <br>
+    <label class="btn" for="fileInput">Browse File</label>
+    <input type="file" id="fileInput" accept=".csv,.tsv">
+  </div>
+  <div style="font-size:0.75rem;color:var(--muted)">Works 100% in-browser · No data leaves your device</div>
+</div>
+
+<!-- Dashboard -->
+<div id="dashboard">
+  <div class="dash-header">
+    <div>
+      <div class="dash-title" id="dashTitle">📊 CSV Dashboard</div>
+      <div class="dash-meta" id="dashMeta"></div>
+    </div>
+    <button class="reset-btn" onclick="resetDashboard()">⬆ Upload another CSV</button>
+  </div>
+  <div class="kpi-grid" id="kpiGrid"></div>
+  <div class="charts-grid" id="chartsGrid"></div>
+</div>
+
+<script>
+// ── Colour palette ──
+const COLOURS = [
+  '#58a6ff','#3fb950','#f0883e','#bc8cff','#ffa657','#79c0ff',
+  '#56d364','#ff7b72','#d2a8ff','#ffa198','#63e6be','#ffd60a'
+];
+const chartInstances = [];
+
+// ── Drag & Drop ──
+const dropBox = document.getElementById('dropBox');
+const fileInput = document.getElementById('fileInput');
+
+['dragenter','dragover'].forEach(e => dropBox.addEventListener(e, ev => { ev.preventDefault(); dropBox.classList.add('drag'); }));
+['dragleave','drop'].forEach(e => dropBox.addEventListener(e, ev => { ev.preventDefault(); dropBox.classList.remove('drag'); }));
+dropBox.addEventListener('drop', ev => loadFile(ev.dataTransfer.files[0]));
+fileInput.addEventListener('change', () => loadFile(fileInput.files[0]));
+
+function resetDashboard() {
+  chartInstances.forEach(c => c.destroy());
+  chartInstances.length = 0;
+  document.getElementById('kpiGrid').innerHTML = '';
+  document.getElementById('chartsGrid').innerHTML = '';
+  document.getElementById('dashboard').style.display = 'none';
+  document.getElementById('dropzone').style.display = 'flex';
+  fileInput.value = '';
+}
+
+function loadFile(file) {
+  if (!file) return;
+  Papa.parse(file, {
+    header: true, skipEmptyLines: true, dynamicTyping: true,
+    complete: res => buildDashboard(res.data, res.meta.fields, file.name)
+  });
+}
+
+// ── Column classification ──
+function classifyColumns(data, fields) {
+  const result = { numeric: [], categorical: [], date: [], boolean: [] };
+  fields.forEach(f => {
+    const vals = data.map(r => r[f]).filter(v => v !== null && v !== undefined && v !== '');
+    if (vals.length === 0) return;
+    const numVals = vals.filter(v => typeof v === 'number' && !isNaN(v));
+    if (numVals.length / vals.length > 0.85) { result.numeric.push(f); return; }
+    const dateCount = vals.filter(v => {
+      const s = String(v); return s.match(/^\d{4}-\d{2}/) || s.match(/^\d{2}[\/\-]\d{2}[\/\-]\d{4}/);
+    }).length;
+    if (dateCount / vals.length > 0.7) { result.date.push(f); return; }
+    const uniq = [...new Set(vals.map(String))];
+    if (uniq.length <= 2 && (uniq.includes('true') || uniq.includes('false') || uniq.includes('yes') || uniq.includes('no'))) {
+      result.boolean.push(f); return;
+    }
+    result.categorical.push(f);
+  });
+  return result;
+}
+
+function freq(data, field) {
+  const counts = {};
+  data.forEach(r => { const v = String(r[field] ?? 'N/A'); counts[v] = (counts[v] || 0) + 1; });
+  return Object.entries(counts).sort((a, b) => b[1] - a[1]);
+}
+
+function numStats(data, field) {
+  const vals = data.map(r => r[field]).filter(v => typeof v === 'number' && !isNaN(v));
+  if (!vals.length) return null;
+  vals.sort((a, b) => a - b);
+  const sum = vals.reduce((a, b) => a + b, 0);
+  const mean = sum / vals.length;
+  const mid = Math.floor(vals.length / 2);
+  const median = vals.length % 2 ? vals[mid] : (vals[mid-1] + vals[mid]) / 2;
+  const std = Math.sqrt(vals.reduce((s, v) => s + (v - mean) ** 2, 0) / vals.length);
+  return { vals, min: vals[0], max: vals[vals.length-1], mean, median, std, count: vals.length };
+}
+
+function histogram(vals, bins = 8) {
+  const min = Math.min(...vals), max = Math.max(...vals);
+  if (min === max) return [{ label: String(min), count: vals.length }];
+  const step = (max - min) / bins;
+  const buckets = Array.from({ length: bins }, (_, i) => ({
+    label: `${fmt(min + i * step)}–${fmt(min + (i+1) * step)}`, count: 0
+  }));
+  vals.forEach(v => {
+    let i = Math.floor((v - min) / step);
+    if (i >= bins) i = bins - 1;
+    buckets[i].count++;
+  });
+  return buckets;
+}
+
+function fmt(n) {
+  if (Math.abs(n) >= 1e6) return (n/1e6).toFixed(1) + 'M';
+  if (Math.abs(n) >= 1e3) return (n/1e3).toFixed(1) + 'K';
+  return Number.isInteger(n) ? n : parseFloat(n.toFixed(2));
+}
+
+function yearMonth(str) {
+  const s = String(str);
+  const m = s.match(/^(\d{4}[-\/]\d{2})/);
+  return m ? m[1] : s.slice(0, 7);
+}
+
+function makeChart(id, config) {
+  const ctx = document.getElementById(id).getContext('2d');
+  const c = new Chart(ctx, config);
+  chartInstances.push(c);
+  return c;
+}
+
+function addCard(html, wide = false) {
+  const div = document.createElement('div');
+  div.className = 'chart-card' + (wide ? ' wide' : '');
+  div.innerHTML = html;
+  document.getElementById('chartsGrid').appendChild(div);
+  return div;
+}
+
+// ── Main builder ──
+function buildDashboard(data, fields, filename) {
+  document.getElementById('dropzone').style.display = 'none';
+  document.getElementById('dashboard').style.display = 'block';
+  document.getElementById('dashTitle').textContent = '📊 ' + filename.replace(/\.csv$/i, '');
+  document.getElementById('dashMeta').textContent =
+    `${data.length.toLocaleString()} rows · ${fields.length} columns`;
+
+  const cols = classifyColumns(data, fields);
+
+  // ── KPI row ──
+  const kpiGrid = document.getElementById('kpiGrid');
+  kpiGrid.innerHTML = '';
+
+  // Total rows
+  kpiGrid.innerHTML += kpiCard(data.length.toLocaleString(), 'Total Rows', '', '#58a6ff');
+
+  // Numeric column KPIs (first 5)
+  cols.numeric.slice(0, 5).forEach((f, i) => {
+    const st = numStats(data, f);
+    if (!st) return;
+    kpiGrid.innerHTML += kpiCard(fmt(st.mean), `Avg ${f}`, `Min ${fmt(st.min)} · Max ${fmt(st.max)}`, COLOURS[i+1]);
+  });
+
+  // Categorical uniques
+  cols.categorical.slice(0, 3).forEach((f, i) => {
+    const uniq = new Set(data.map(r => r[f])).size;
+    kpiGrid.innerHTML += kpiCard(uniq, `Unique ${f}`, '', COLOURS[i+6]);
+  });
+
+  // ── Charts ──
+  const cg = document.getElementById('chartsGrid');
+  cg.innerHTML = '';
+
+  let cid = 0;
+  const uid = () => 'c' + (cid++);
+
+  // 1. Categorical columns → Doughnut / Bar
+  cols.categorical.forEach((f, fi) => {
+    const entries = freq(data, f);
+    const top = entries.slice(0, 12);
+    const labels = top.map(e => e[0]);
+    const values = top.map(e => e[1]);
+    const id = uid();
+    const isDoughnut = labels.length <= 6;
+    addCard(`
+      <div class="chart-title">${isDoughnut ? '🍩' : '📊'} ${f} Distribution</div>
+      <div class="chart-wrap" style="height:220px"><canvas id="${id}"></canvas></div>
+    `);
+    if (isDoughnut) {
+      makeChart(id, { type: 'doughnut', data: {
+        labels, datasets: [{ data: values,
+          backgroundColor: COLOURS.slice(0, labels.length),
+          borderWidth: 2, borderColor: '#161b22' }]
+      }, options: { responsive: true, maintainAspectRatio: false, cutout: '55%',
+        plugins: { legend: { position: 'right', labels: { color: '#8b949e', font: { size: 11 }, boxWidth: 12 } } }
+      }});
+    } else {
+      makeChart(id, { type: 'bar', data: {
+        labels, datasets: [{ label: 'Count', data: values,
+          backgroundColor: COLOURS[fi % COLOURS.length], borderRadius: 5 }]
+      }, options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: '#8b949e' }, grid: { color: '#30363d' } },
+          y: { ticks: { color: '#8b949e', font: { size: 10 } }, grid: { display: false } }
+        }
+      }});
+    }
+  });
+
+  // 2. Numeric columns → Histogram
+  cols.numeric.forEach((f, fi) => {
+    const st = numStats(data, f);
+    if (!st || st.count < 5) return;
+    const bins = histogram(st.vals, 8);
+    const id = uid();
+    addCard(`
+      <div class="chart-title">📈 ${f} — Distribution</div>
+      <div class="chart-wrap" style="height:200px"><canvas id="${id}"></canvas></div>
+    `);
+    makeChart(id, { type: 'bar', data: {
+      labels: bins.map(b => b.label),
+      datasets: [{ label: f, data: bins.map(b => b.count),
+        backgroundColor: COLOURS[fi % COLOURS.length], borderRadius: 4 }]
+    }, options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#8b949e', font: { size: 10 }, maxRotation: 30 }, grid: { display: false } },
+        y: { ticks: { color: '#8b949e' }, grid: { color: '#30363d' } }
+      }
+    }});
+  });
+
+  // 3. Date column → trend over time
+  cols.date.forEach((f, fi) => {
+    const grouped = {};
+    data.forEach(r => {
+      const key = yearMonth(r[f]);
+      grouped[key] = (grouped[key] || 0) + 1;
+    });
+    const sorted = Object.entries(grouped).sort((a, b) => a[0].localeCompare(b[0]));
+    if (sorted.length < 2) return;
+    const id = uid();
+    const isWide = sorted.length > 12;
+    addCard(`
+      <div class="chart-title">📅 ${f} — Trend Over Time</div>
+      <div class="chart-wrap" style="height:210px"><canvas id="${id}"></canvas></div>
+    `, isWide);
+    makeChart(id, { type: 'line', data: {
+      labels: sorted.map(e => e[0]),
+      datasets: [{ label: 'Count', data: sorted.map(e => e[1]),
+        borderColor: COLOURS[fi], backgroundColor: COLOURS[fi] + '22',
+        fill: true, tension: 0.3, pointRadius: sorted.length > 30 ? 0 : 3 }]
+    }, options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#8b949e', font: { size: 9 }, maxRotation: 45, maxTicksLimit: 20 }, grid: { color: '#30363d' } },
+        y: { ticks: { color: '#8b949e' }, grid: { color: '#30363d' } }
+      }
+    }});
+  });
+
+  // 4. Numeric stats summary table
+  if (cols.numeric.length > 0) {
+    const rows = cols.numeric.map(f => {
+      const st = numStats(data, f);
+      if (!st) return '';
+      return `<tr>
+        <td style="color:var(--text)">${f}</td>
+        <td>${st.count.toLocaleString()}</td>
+        <td style="color:var(--accent)">${fmt(st.mean)}</td>
+        <td>${fmt(st.median)}</td>
+        <td style="color:var(--accent2)">${fmt(st.min)}</td>
+        <td style="color:var(--danger)">${fmt(st.max)}</td>
+        <td style="color:var(--muted)">${fmt(st.std)}</td>
+      </tr>`;
+    }).join('');
+    const card = addCard(`
+      <div class="chart-title">🔢 Numeric Columns — Summary Statistics</div>
+      <div style="overflow-x:auto">
+      <table class="stats-table">
+        <thead><tr><th>Column</th><th>Count</th><th>Mean</th><th>Median</th><th>Min</th><th>Max</th><th>Std Dev</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    `, cols.numeric.length > 3);
+  }
+
+  // 5. Numeric vs Categorical — avg of each numeric per category
+  if (cols.numeric.length >= 1 && cols.categorical.length >= 1) {
+    const catF = cols.categorical[0];
+    const numF = cols.numeric[0];
+    const catEntries = freq(data, catF).slice(0, 10);
+    const topCats = catEntries.map(e => e[0]);
+    const avgs = topCats.map(cat => {
+      const vals = data.filter(r => String(r[catF]) === cat)
+                       .map(r => r[numF]).filter(v => typeof v === 'number');
+      return vals.length ? parseFloat((vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(2)) : 0;
+    });
+    const id = uid();
+    addCard(`
+      <div class="chart-title">⚖️ Avg ${numF} by ${catF}</div>
+      <div class="chart-wrap" style="height:220px"><canvas id="${id}"></canvas></div>
+    `);
+    makeChart(id, { type: 'bar', data: {
+      labels: topCats,
+      datasets: [{ label: `Avg ${numF}`, data: avgs,
+        backgroundColor: topCats.map((_, i) => COLOURS[i % COLOURS.length]), borderRadius: 6 }]
+    }, options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#8b949e', font: { size: 10 }, maxRotation: 30 }, grid: { display: false } },
+        y: { ticks: { color: '#8b949e' }, grid: { color: '#30363d' } }
+      }
+    }});
+
+    // More numeric vs same categorical
+    cols.numeric.slice(1, 4).forEach((numFx, i) => {
+      const avgsX = topCats.map(cat => {
+        const vals = data.filter(r => String(r[catF]) === cat)
+                         .map(r => r[numFx]).filter(v => typeof v === 'number');
+        return vals.length ? parseFloat((vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(2)) : 0;
+      });
+      const idX = uid();
+      addCard(`
+        <div class="chart-title">⚖️ Avg ${numFx} by ${catF}</div>
+        <div class="chart-wrap" style="height:220px"><canvas id="${idX}"></canvas></div>
+      `);
+      makeChart(idX, { type: 'bar', data: {
+        labels: topCats,
+        datasets: [{ label: `Avg ${numFx}`, data: avgsX,
+          backgroundColor: COLOURS[(i+2) % COLOURS.length], borderRadius: 6 }]
+      }, options: { responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: '#8b949e', font: { size: 10 }, maxRotation: 30 }, grid: { display: false } },
+          y: { ticks: { color: '#8b949e' }, grid: { color: '#30363d' } }
+        }
+      }});
+    });
+  }
+
+  // 6. Scatter: first two numerics
+  if (cols.numeric.length >= 2) {
+    const xf = cols.numeric[0], yf = cols.numeric[1];
+    const points = data.filter(r => typeof r[xf] === 'number' && typeof r[yf] === 'number')
+                       .map(r => ({ x: r[xf], y: r[yf] })).slice(0, 1000);
+    const id = uid();
+    addCard(`
+      <div class="chart-title">🔵 Scatter: ${xf} vs ${yf}</div>
+      <div class="chart-wrap" style="height:230px"><canvas id="${id}"></canvas></div>
+    `);
+    makeChart(id, { type: 'scatter', data: {
+      datasets: [{ label: `${xf} vs ${yf}`, data: points,
+        backgroundColor: '#58a6ff44', borderColor: '#58a6ff', pointRadius: 3 }]
+    }, options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { title: { display: true, text: xf, color: '#8b949e' }, ticks: { color: '#8b949e' }, grid: { color: '#30363d' } },
+        y: { title: { display: true, text: yf, color: '#8b949e' }, ticks: { color: '#8b949e' }, grid: { color: '#30363d' } }
+      }
+    }});
+  }
+
+  // 7. Top N rows by a numeric (leaderboard)
+  if (cols.numeric.length > 0) {
+    const nf = cols.numeric[0];
+    const labelField = cols.categorical[0] || fields[0];
+    const sorted = [...data].filter(r => typeof r[nf]==='number')
+                            .sort((a,b) => b[nf] - a[nf]).slice(0, 10);
+    const maxV = sorted[0]?.[nf] || 1;
+    const rows = sorted.map((r, i) => {
+      const v = r[nf];
+      const pct = Math.round((v / maxV) * 100);
+      const c = pct > 75 ? 'var(--danger)' : pct > 40 ? 'var(--warn)' : 'var(--accent)';
+      return `<tr>
+        <td style="color:var(--muted)">${i+1}</td>
+        <td style="color:var(--text);font-size:.72rem">${String(r[labelField]).slice(0,30)}</td>
+        <td style="color:${c};font-weight:700">${fmt(v)}</td>
+        <td style="width:90px"><div class="bar-mini"><div class="bar-fill" style="width:${pct}%;background:${c}"></div></div></td>
+      </tr>`;
+    }).join('');
+    addCard(`
+      <div class="chart-title">🏆 Top 10 by ${nf}</div>
+      <table class="stats-table">
+        <thead><tr><th>#</th><th>${labelField}</th><th>${nf}</th><th>Bar</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `);
+
+    // Bottom 10
+    const bottom = [...data].filter(r => typeof r[nf]==='number')
+                            .sort((a,b) => a[nf] - b[nf]).slice(0, 10);
+    const minV = bottom[0]?.[nf] || 1;
+    const rows2 = bottom.map((r, i) => {
+      const v = r[nf];
+      return `<tr>
+        <td style="color:var(--muted)">${i+1}</td>
+        <td style="color:var(--text);font-size:.72rem">${String(r[labelField]).slice(0,30)}</td>
+        <td style="color:var(--accent2);font-weight:700">${fmt(v)}</td>
+        <td style="width:90px"><div class="bar-mini"><div class="bar-fill" style="width:${Math.round(Math.abs(v/(maxV||1))*100)}%;background:var(--accent2)"></div></div></td>
+      </tr>`;
+    }).join('');
+    addCard(`
+      <div class="chart-title">🔻 Bottom 10 by ${nf}</div>
+      <table class="stats-table">
+        <thead><tr><th>#</th><th>${labelField}</th><th>${nf}</th><th>Bar</th></tr></thead>
+        <tbody>${rows2}</tbody>
+      </table>
+    `);
+  }
+
+  // 8. Column type overview card
+  const allTypes = [
+    ...cols.numeric.map(f => ({ f, type: 'Numeric', pill: 'pill-blue' })),
+    ...cols.categorical.map(f => ({ f, type: 'Categorical', pill: 'pill-green' })),
+    ...cols.date.map(f => ({ f, type: 'Date', pill: 'pill-warn' })),
+    ...cols.boolean.map(f => ({ f, type: 'Boolean', pill: 'pill-danger' })),
+  ];
+  const typeRows = allTypes.map(({ f, type, pill }) =>
+    `<tr><td style="color:var(--text)">${f}</td><td><span class="pill ${pill}">${type}</span></td></tr>`
+  ).join('');
+  addCard(`
+    <div class="chart-title">🗂️ Column Overview</div>
+    <div style="overflow-y:auto;max-height:280px">
+    <table class="stats-table">
+      <thead><tr><th>Column</th><th>Type Detected</th></tr></thead>
+      <tbody>${typeRows}</tbody>
+    </table></div>
+  `);
+}
+
+function kpiCard(val, lbl, sub, color) {
+  return `<div class="kpi-card">
+    <div class="kpi-val" style="color:${color}">${val}</div>
+    <div class="kpi-lbl">${lbl}</div>
+    ${sub ? `<div class="kpi-sub">${sub}</div>` : ''}
+  </div>`;
+}
+</script>
+</body>
+</html>
